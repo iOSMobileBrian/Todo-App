@@ -3,10 +3,13 @@ import Foundation
     // * Create the `Todo` struct.
     // * Ensure it has properties: id (UUID), title (String), and isCompleted (Bool).
     struct Todo: CustomStringConvertible, Codable  {
-        let description: String
         var id: UUID = UUID()
         var title: String
         var isCompleted: Bool = false
+        
+        var description: String {
+            "\(title) - \(isCompleted ? "completed" : "incomplete")"
+        }
     }
     
     // Create the `Cache` protocol that defines the following method signatures:
@@ -14,7 +17,7 @@ import Foundation
     //  `func load() -> [Todo]?`: Retrieves and returns the saved todos, or nil if none exist.
     protocol Cache {
         func save(todos: [Todo]) -> Bool
-        func load() -> [Todo]
+        func load() -> [Todo]?
     }
     
     // `FileSystemCache`: This implementation should utilize the file system
@@ -33,22 +36,27 @@ import Foundation
             fileUrl = directory.appendingPathComponent("todos.json")
         }
         
-        func load() -> [Todo]{
+        func load() -> [Todo]?{
             guard FileManager.default.fileExists(atPath: fileUrl.path()) else {
                 return []
             }
-            
-            let data = try? Data(contentsOf: fileUrl)
-            return try! JSONDecoder().decode([Todo].self, from: data!)
+            do {
+                let data = try Data(contentsOf: fileUrl)
+                return try JSONDecoder().decode([Todo].self, from: data)
+            } catch {
+                return []
+            }
             
         }
         
-        func save(todos: [Todo]) -> Bool{
-            var savedTodos:[Todo] = load()
-            savedTodos.append(contentsOf: todos)
-            let data = try? JSONEncoder().encode(savedTodos)
-            try? data!.write(to: fileUrl, options: .atomic)
-            return true
+        func save(todos: [Todo]) -> Bool {
+            do {
+                let data = try JSONEncoder().encode(todos)
+                try data.write(to: fileUrl, options: .atomic)
+                return true
+            } catch {
+                return false
+            }
         }
     }
     
@@ -58,7 +66,7 @@ import Foundation
     final class InMemoryCache: Cache {
         private var memoryArarry : [Todo] = []
         
-        func load() -> [Todo]{
+        func load() -> [Todo]?{
             return memoryArarry
         }
         
@@ -81,15 +89,16 @@ import Foundation
         
         init(manager: any Cache){
             self.manager = manager
-            self.todos = manager.load()
+            self.todos = manager.load() ?? []
         }
         
         func listTodos() -> [Todo]{
+            todos = manager.load() ?? []
             return todos
         }
         
-        func addTodo(with title: String){
-            let todo = Todo(description: title, title: title)
+        func add(_ title: String){
+            let todo = Todo(title: title)
             todos.append(todo)
             if manager.save(todos: todos){
                 print("todo \(title) has been added 📌")
@@ -97,18 +106,21 @@ import Foundation
             
         }
         
-        func toggleCompletion(forTodoAtIndex selection: Int){
-            let index = selection - 1
-            todos[index].isCompleted = true
+        func toggleCompletion( at index: Int){
+            let currentIndex = index - 1
+            todos[currentIndex].isCompleted.toggle()
+            let status = todos[currentIndex].isCompleted ? "has been completed ✅" : "is incomplete ❌"
             if manager.save(todos:todos){
-                print("\(todos[index].title) has been completed ✅")
+                print("\(todos[currentIndex].title) \(status) ")
             }
         }
         
-        func deleteTodo(atIndex index: Int){
-            todos.remove(at: index)
+        func deleteTodo(at index: Int){
+           let currentIndex = index - 1
+            let title = todos[currentIndex].title
+            todos.remove(at: currentIndex)
             if manager.save(todos: todos){
-                print("todo at index: \(index) has been removed 🗑️")
+                print("todo:\(title) has been removed 🗑️")
             }
             
             
@@ -185,9 +197,11 @@ import Foundation
         
         private func promptForIndex(_ question: String) -> Int? {
             print(question, terminator: " ")
+            let todoList = manager.listTodos()
             
             guard let input = readLine(),
-                  let index = Int(input.trimmingCharacters(in: .whitespacesAndNewlines)) else {
+                  let index = Int(input.trimmingCharacters(in: .whitespacesAndNewlines)),
+                  todoList.indices.contains(index - 1) else {
                 print("Please enter a valid number.")
                 return nil
             }
@@ -198,13 +212,13 @@ import Foundation
         private func execute(_ command: Command) {
             switch command {
             case .add(let title):
-                manager.addTodo(with: title)
+                manager.add(title)
             case .list:
                 displayTodos(todos: manager.listTodos())
             case .toggle(let index):
-                manager.toggleCompletion(forTodoAtIndex: index)
+                manager.toggleCompletion(at: index)
             case .delete(let index):
-                manager.deleteTodo(atIndex: index)
+                manager.deleteTodo(at: index)
             case .exit:
                 break
             }
@@ -223,7 +237,7 @@ import Foundation
         }
     }
     
-    let app = App(manager: TodoManager(manager: InMemoryCache()))
+    let app = App(manager: TodoManager(manager: JSONFileManagerCache()))
     app.run()
 
 
